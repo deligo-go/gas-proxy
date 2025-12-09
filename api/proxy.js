@@ -3,7 +3,7 @@ const https = require('https');
 const { URL } = require('url');
 
 // This URL must match your final, deployed GAS Web App URL
-const GAS_BASE = 'https://script.google.com/macros/s/AKfycbxjR1NDJlHbktoEAmA1t-m1Lphe_gV7yqI4UR99ju5WRnkFkIIrhqopz2VEiVNRQ9Pn7g/exec';
+const GAS_BASE = 'https://script.google.com/macros/s/AKfycbzuIB_dH1qRhoOFY2Xev1Q67PZJ459ZsQLS1kw0Vo944dZFONJh3RJrf64VzUPNMRiX2g/exec';
 const IGNORED_PARAMS = ['pli', 'authuser', 'ifk'];
 
 // Function to extract and unescape the actual HTML from GAS response
