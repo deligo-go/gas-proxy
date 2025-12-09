@@ -5,20 +5,15 @@ const { URL } = require('url'); // Using the built-in URL class
 // **IMPORTANT: Use YOUR full Web App URL here**
 const GAS_BASE = 'https://script.google.com/macros/s/AKfycbxjR1NDJlHbktoEAmA1t-m1Lphe_gV7yqI4UR99ju5WRnkFkIIrhqopz2VEiVNRQ9Pn7g/exec';
 
-// List of Google-specific query parameters to remove
+// List of Google-specific query parameters to remove (always remove these)
 const IGNORED_PARAMS = ['pli', 'authuser', 'ifk'];
 
 module.exports = (req, res) => {
-    // 1. Get the current request path and query
+    // 1. Clean the request URL
     const requestUrl = new URL(req.url, `https://${req.headers.host}`);
-    
-    // 2. Determine the path AFTER the base /exec/
-    let fullPathAndQuery = requestUrl.pathname + requestUrl.search;
-    
-    // 3. Clean the query string: Create a new URL object from the GAS_BASE for manipulation
     const finalGasUrl = new URL(GAS_BASE);
 
-    // 4. Copy ONLY valid query parameters (like ?id=VALUE)
+    // Copy ONLY valid query parameters (like ?id=VALUE)
     const originalParams = new URLSearchParams(requestUrl.search);
     
     originalParams.forEach((value, key) => {
@@ -27,17 +22,17 @@ module.exports = (req, res) => {
         }
     });
 
-    // 5. Construct the final target URL for the proxy
-    // We combine the GAS_BASE path with the cleaned query string
     const targetUrl = finalGasUrl.toString();
-    const parsedUrl = new URL(targetUrl); // Re-parse for request options
+    const parsedUrl = new URL(targetUrl);
 
     const options = {
         hostname: parsedUrl.hostname,
         path: parsedUrl.pathname + parsedUrl.search, // Use cleaned path and query
         method: req.method,
         headers: {
+            // Forward standard headers
             ...req.headers,
+            // Override the Host header to match the Google Scripts server
             'host': parsedUrl.hostname,
             'connection': 'keep-alive',
         },
@@ -46,13 +41,24 @@ module.exports = (req, res) => {
     const proxyReq = https.request(options, (proxyRes) => {
         res.statusCode = proxyRes.statusCode || 200;
 
+        // 2. Filter out problematic headers and force encoding
         Object.keys(proxyRes.headers).forEach((key) => {
             const lowerKey = key.toLowerCase();
-            if (!['transfer-encoding', 'content-encoding', 'content-length', 'content-security-policy', 'x-xss-protection'].includes(lowerKey)) {
-                res.setHeader(key, proxyRes.headers[key]);
+            
+            // BLOCK headers that interfere with CSP/CORS/XSS protection or encoding
+            if (['transfer-encoding', 'content-encoding', 'content-length', 'content-security-policy', 'x-xss-protection', 'x-frame-options'].includes(lowerKey)) {
+                return; // Skip setting this header
             }
+            
+            res.setHeader(key, proxyRes.headers[key]);
         });
+        
+        // 3. Set Content-Type explicitly to fix the gibberish issue
+        if (!res.headersSent && !res.getHeader('Content-Type')) {
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        }
 
+        // 4. Pipe the response
         proxyRes.pipe(res);
     });
 
