@@ -29,25 +29,23 @@ module.exports = (req, res) => {
         headers: {
             'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
         },
     };
 
     const proxyReq = https.request(options, (proxyRes) => {
-        let data = '';
+        // Set status code
+        res.statusCode = proxyRes.statusCode || 200;
 
-        proxyRes.setEncoding('utf8');
-        
-        proxyRes.on('data', (chunk) => {
-            data += chunk;
+        // Copy all headers except problematic security ones
+        Object.keys(proxyRes.headers).forEach((key) => {
+            const lowerKey = key.toLowerCase();
+            if (!['content-security-policy', 'x-frame-options', 'strict-transport-security'].includes(lowerKey)) {
+                res.setHeader(key, proxyRes.headers[key]);
+            }
         });
 
-        proxyRes.on('end', () => {
-            res.statusCode = proxyRes.statusCode || 200;
-            res.setHeader('Content-Type', 'text/html; charset=utf-8');
-            res.setHeader('Content-Length', Buffer.byteLength(data));
-            res.end(data);
-        });
+        // Simply pipe the response
+        proxyRes.pipe(res);
     });
 
     proxyReq.on('error', (err) => {
@@ -59,5 +57,10 @@ module.exports = (req, res) => {
         }
     });
 
-    proxyReq.end();
+    // Handle POST data if present
+    if (req.method === 'POST') {
+        req.pipe(proxyReq);
+    } else {
+        proxyReq.end();
+    }
 };
