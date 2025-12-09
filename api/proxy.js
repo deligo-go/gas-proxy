@@ -2,48 +2,56 @@
 const https = require('https');
 const url = require('url');
 
-const GAS_BASE = 'https://script.google.com/macros/s/AKfycbxjR1NDJlHbktoEAmA1t-m1Lphe_gV7yqI4UR99ju5WRnkFkIIrhqopz2VEiVNRQ9Pn7g/exec';
+// IMPORTANT: This should be the full URL of your deployed GAS Web App.
+const GAS_BASE = 'https://script.google.com/macros/s/AKfycbxjR1NDJlHbktoEAmA1t-m1Lphe_gV7yqI4UR99ju5WRnkFkIIrhgopz2VEiVNRQ9Pn7g/exec';
 
 module.exports = (req, res) => {
-  const targetPath = req.url || '/';  // Preserve query params and path
-  const targetUrl = GAS_BASE + targetPath;
+    // 1. Capture the full path and query string from the client request
+    const fullPathAndQuery = req.url || ''; 
+    
+    // 2. Construct the final URL for the GAS endpoint
+    const targetUrl = GAS_BASE + fullPathAndQuery;
 
-  const parsedUrl = url.parse(targetUrl);
+    const parsedUrl = url.parse(targetUrl);
 
-  const options = {
-    hostname: parsedUrl.hostname,
-    path: parsedUrl.path,
-    method: req.method,
-    headers: {
-      ...req.headers,
-      host: parsedUrl.hostname,  // Set correct host
-      connection: 'keep-alive',
-    },
-  };
+    // 3. Configure the proxy request
+    const options = {
+        hostname: parsedUrl.hostname,
+        path: parsedUrl.path, // This includes /macros/s/.../exec/?id=VALUE
+        method: req.method,
+        headers: {
+            // Forward standard headers
+            ...req.headers,
+            // Override the Host header to match the Google Scripts server, not Vercel
+            'host': parsedUrl.hostname,
+            'connection': 'keep-alive',
+        },
+    };
 
-  const proxyReq = https.request(options, (proxyRes) => {
-    // Forward status code
-    res.statusCode = proxyRes.statusCode || 200;
+    const proxyReq = https.request(options, (proxyRes) => {
+        // 4. Forward status code
+        res.statusCode = proxyRes.statusCode || 200;
 
-    // Forward headers (skip problematic ones)
-    Object.keys(proxyRes.headers).forEach((key) => {
-      if (!['transfer-encoding', 'content-encoding', 'content-length'].includes(key.toLowerCase())) {
-        res.setHeader(key, proxyRes.headers[key]);
-      }
+        // 5. Forward headers, specifically excluding those that confuse compression or caching
+        Object.keys(proxyRes.headers).forEach((key) => {
+            const lowerKey = key.toLowerCase();
+            if (!['transfer-encoding', 'content-encoding', 'content-length', 'cache-control'].includes(lowerKey)) {
+                res.setHeader(key, proxyRes.headers[key]);
+            }
+        });
+
+        // 6. Pipe the response from GAS back to the client
+        proxyRes.pipe(res);
     });
 
-    // Pipe the response from GAS to the client
-    proxyRes.pipe(res);
-  });
+    proxyReq.on('error', (err) => {
+        console.error('Proxy request failed:', err);
+        if (!res.headersSent) {
+            res.statusCode = 502;
+            res.end('Bad Gateway: Failed to communicate with the Apps Script backend.');
+        }
+    });
 
-  proxyReq.on('error', (err) => {
-    console.error('Proxy request error:', err);
-    if (!res.headersSent) {
-      res.statusCode = 502;
-      res.end('Bad Gateway: Failed to reach the service.');
-    }
-  });
-
-  // Forward request body (important for POST if ever used)
-  req.pipe(proxyReq);
+    // 7. Ensure the request body (important for POST or certain GETs) is forwarded
+    req.pipe(proxyReq);
 };
