@@ -7,27 +7,49 @@ const GAS_BASE = 'https://script.google.com/macros/s/AKfycbwE1vWTiEbKRr09DPuw1Zw
 const IGNORED_PARAMS = ['pli', 'authuser', 'ifk'];
 
 function extractUserHtml(gasResponse) {
-    // Try to find the userHtml field in the JSON initialization
-    const match = gasResponse.match(/"userHtml":\s*"([^]*?)(?:","|"\})/);
-    if (!match) return null;
+    // Find the userHtml field - it's between "userHtml":" and the next "
+    const startMarker = '"userHtml":"';
+    const startIdx = gasResponse.indexOf(startMarker);
     
-    let html = match[1];
+    if (startIdx === -1) return null;
     
-    try {
-        // Parse as JSON string to handle all escapes
-        html = JSON.parse('"' + html + '"');
-    } catch (e) {
-        // Fallback: manual unescape
-        html = html.replace(/\\x([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
-                   .replace(/\\n/g, '\n')
-                   .replace(/\\r/g, '\r')
-                   .replace(/\\t/g, '\t')
-                   .replace(/\\"/g, '"')
-                   .replace(/\\'/g, "'")
-                   .replace(/\\\\/g, '\\');
+    let idx = startIdx + startMarker.length;
+    let html = '';
+    let escape = false;
+    
+    // Parse character by character to handle escapes properly
+    while (idx < gasResponse.length) {
+        const char = gasResponse[idx];
+        
+        if (escape) {
+            // Handle escaped characters
+            if (char === 'n') html += '\n';
+            else if (char === 'r') html += '\r';
+            else if (char === 't') html += '\t';
+            else if (char === '"') html += '"';
+            else if (char === '\\') html += '\\';
+            else if (char === 'x') {
+                // Hex escape like \x3c
+                const hex = gasResponse.substr(idx + 1, 2);
+                html += String.fromCharCode(parseInt(hex, 16));
+                idx += 2;
+            } else {
+                html += char;
+            }
+            escape = false;
+        } else if (char === '\\') {
+            escape = true;
+        } else if (char === '"') {
+            // End of userHtml string
+            break;
+        } else {
+            html += char;
+        }
+        
+        idx++;
     }
     
-    return html;
+    return html.length > 100 ? html : null;
 }
 
 module.exports = (req, res) => {
@@ -65,36 +87,26 @@ module.exports = (req, res) => {
         });
 
         proxyRes.on('end', () => {
-            // Try to extract clean HTML
-            const userHtml = extractUserHtml(data);
-            
-            if (userHtml && userHtml.length > 500) {
-                // Successfully extracted clean HTML
-                let finalHtml = userHtml;
+            // Check if this is the wrapper HTML
+            if (data.includes('sandboxFrame') && data.includes('userHtml')) {
+                // Extract the actual HTML content
+                const userHtml = extractUserHtml(data);
                 
-                // Fix form action URLs
-                finalHtml = finalHtml.replace(
-                    /action=["']https:\/\/script\.google\.com\/macros\/s\/[^"']+["']/g,
-                    `action="https://${req.headers.host}"`
-                );
-                
-                console.log('Serving extracted HTML, length:', finalHtml.length);
-                
-                res.statusCode = 200;
-                res.setHeader('Content-Type', 'text/html; charset=utf-8');
-                res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-                res.end(finalHtml);
-            } else {
-                // Fallback: serve wrapper with fixed URLs
-                console.log('Extraction failed, serving wrapper');
-                
-                data = data.replace(/href=["']\/static\//g, 'href="https://script.google.com/static/');
-                data = data.replace(/src=["']\/static\//g, 'src="https://script.google.com/static/');
-                
-                res.statusCode = proxyRes.statusCode || 200;
-                res.setHeader('Content-Type', 'text/html; charset=utf-8');
-                res.end(data);
+                if (userHtml && userHtml.length > 500) {
+                    console.log('✓ Extracted clean HTML, length:', userHtml.length);
+                    
+                    res.statusCode = 200;
+                    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+                    res.end(userHtml);
+                    return;
+                }
             }
+            
+            // If extraction failed or it's already clean HTML, serve as-is
+            console.log('✗ Serving original response');
+            res.statusCode = proxyRes.statusCode || 200;
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            res.end(data);
         });
     });
 
