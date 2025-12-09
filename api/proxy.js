@@ -12,16 +12,20 @@ function extractUserHtml(gasResponse) {
     if (!match) return null;
     
     let html = match[1];
-    // Unescape the JSON string
-    html = html.replace(/\\n/g, '\n')
-               .replace(/\\"/g, '"')
-               .replace(/\\'/g, "'")
-               .replace(/\\\\/g, '\\')
-               .replace(/\\x3c/g, '<')
+    // Unescape the JSON string - do this in correct order
+    html = html.replace(/\\x3c/g, '<')
                .replace(/\\x3e/g, '>')
                .replace(/\\x2f/g, '/')
                .replace(/\\x27/g, "'")
-               .replace(/\\x26/g, '&');
+               .replace(/\\x26/g, '&')
+               .replace(/\\x3d/g, '=')
+               .replace(/\\x22/g, '"')
+               .replace(/\\n/g, '\n')
+               .replace(/\\r/g, '\r')
+               .replace(/\\t/g, '\t')
+               .replace(/\\"/g, '"')
+               .replace(/\\'/g, "'")
+               .replace(/\\\\/g, '\\');
     
     return html;
 }
@@ -74,6 +78,7 @@ module.exports = (req, res) => {
                 
                 res.statusCode = 200;
                 res.setHeader('Content-Type', 'text/html; charset=utf-8');
+                res.setHeader('Content-Security-Policy', "default-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://thumbs.dreamstime.com; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com;");
                 res.setHeader('Content-Length', Buffer.byteLength(finalHtml));
                 res.end(finalHtml);
             } else {
