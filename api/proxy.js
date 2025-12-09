@@ -1,7 +1,6 @@
 // api/proxy.js
 const https = require('https');
 const { URL } = require('url');
-const zlib = require('zlib');
 
 // This URL must match your final, deployed GAS Web App URL
 const GAS_BASE = 'https://script.google.com/macros/s/AKfycbxjR1NDJlHbktoEAmA1t-m1Lphe_gV7yqI4UR99ju5WRnkFkIIrhqopz2VEiVNRQ9Pn7g/exec';
@@ -28,55 +27,37 @@ module.exports = (req, res) => {
         path: parsedUrl.pathname + parsedUrl.search,
         method: req.method,
         headers: {
-            ...req.headers,
-            'host': parsedUrl.hostname,
-            'accept-encoding': 'gzip, deflate, br', // Accept compression
+            'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
         },
     };
 
     const proxyReq = https.request(options, (proxyRes) => {
-        res.statusCode = proxyRes.statusCode || 200;
+        let data = '';
 
-        // Set headers but exclude problematic ones
-        Object.keys(proxyRes.headers).forEach((key) => {
-            const lowerKey = key.toLowerCase();
-            
-            // Block only CSP and security headers, but keep encoding info
-            if (['content-security-policy', 'x-frame-options', 'strict-transport-security'].includes(lowerKey)) {
-                return;
-            }
-            
-            res.setHeader(key, proxyRes.headers[key]);
+        proxyRes.setEncoding('utf8');
+        
+        proxyRes.on('data', (chunk) => {
+            data += chunk;
         });
 
-        // Handle decompression based on content-encoding
-        const encoding = proxyRes.headers['content-encoding'];
-        let stream = proxyRes;
-
-        if (encoding === 'gzip') {
-            stream = proxyRes.pipe(zlib.createGunzip());
-        } else if (encoding === 'deflate') {
-            stream = proxyRes.pipe(zlib.createInflate());
-        } else if (encoding === 'br') {
-            stream = proxyRes.pipe(zlib.createBrotliDecompress());
-        }
-
-        // Remove content-encoding header since we're decompressing
-        if (encoding) {
-            res.removeHeader('content-encoding');
-            res.removeHeader('content-length');
-        }
-
-        stream.pipe(res);
+        proxyRes.on('end', () => {
+            res.statusCode = proxyRes.statusCode || 200;
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            res.setHeader('Content-Length', Buffer.byteLength(data));
+            res.end(data);
+        });
     });
 
     proxyReq.on('error', (err) => {
         console.error('Proxy request failed:', err);
         if (!res.headersSent) {
             res.statusCode = 502;
-            res.end('Bad Gateway.');
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            res.end('<h1>Bad Gateway</h1><p>Error: ' + err.message + '</p>');
         }
     });
 
-    req.pipe(proxyReq);
+    proxyReq.end();
 };
