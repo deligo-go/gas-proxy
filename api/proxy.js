@@ -1,36 +1,51 @@
 // api/proxy.js
 const https = require('https');
-const url = require('url');
+const { URL } = require('url'); // Using the built-in URL class
 
 // **IMPORTANT: Use YOUR full Web App URL here**
 const GAS_BASE = 'https://script.google.com/macros/s/AKfycbxjR1NDJlHbktoEAmA1t-m1Lphe_gV7yqI4UR99ju5WRnkFkIIrhqopz2VEiVNRQ9Pn7g/exec';
 
-module.exports = (req, res) => {
-    // Capture the entire path including query parameters (e.g., /?id=EMP06)
-    const fullPathAndQuery = req.url || ''; 
-    
-    // Construct the final URL for the Apps Script endpoint
-    const targetUrl = GAS_BASE + fullPathAndQuery;
+// List of Google-specific query parameters to remove
+const IGNORED_PARAMS = ['pli', 'authuser', 'ifk'];
 
-    const parsedUrl = url.parse(targetUrl);
+module.exports = (req, res) => {
+    // 1. Get the current request path and query
+    const requestUrl = new URL(req.url, `https://${req.headers.host}`);
+    
+    // 2. Determine the path AFTER the base /exec/
+    let fullPathAndQuery = requestUrl.pathname + requestUrl.search;
+    
+    // 3. Clean the query string: Create a new URL object from the GAS_BASE for manipulation
+    const finalGasUrl = new URL(GAS_BASE);
+
+    // 4. Copy ONLY valid query parameters (like ?id=VALUE)
+    const originalParams = new URLSearchParams(requestUrl.search);
+    
+    originalParams.forEach((value, key) => {
+        if (!IGNORED_PARAMS.includes(key.toLowerCase())) {
+            finalGasUrl.searchParams.set(key, value);
+        }
+    });
+
+    // 5. Construct the final target URL for the proxy
+    // We combine the GAS_BASE path with the cleaned query string
+    const targetUrl = finalGasUrl.toString();
+    const parsedUrl = new URL(targetUrl); // Re-parse for request options
 
     const options = {
         hostname: parsedUrl.hostname,
-        path: parsedUrl.path, // Includes the full query string
+        path: parsedUrl.pathname + parsedUrl.search, // Use cleaned path and query
         method: req.method,
         headers: {
             ...req.headers,
-            // Override the Host header to match the Google Scripts server
             'host': parsedUrl.hostname,
             'connection': 'keep-alive',
         },
     };
 
     const proxyReq = https.request(options, (proxyRes) => {
-        // Forward status code
         res.statusCode = proxyRes.statusCode || 200;
 
-        // Forward headers, excluding problematic ones that cause issues in proxy environments
         Object.keys(proxyRes.headers).forEach((key) => {
             const lowerKey = key.toLowerCase();
             if (!['transfer-encoding', 'content-encoding', 'content-length', 'content-security-policy', 'x-xss-protection'].includes(lowerKey)) {
@@ -38,7 +53,6 @@ module.exports = (req, res) => {
             }
         });
 
-        // Pipe the response from GAS back to the client
         proxyRes.pipe(res);
     });
 
@@ -50,6 +64,5 @@ module.exports = (req, res) => {
         }
     });
 
-    // Ensure the request body is forwarded (though usually empty for GET)
     req.pipe(proxyReq);
 };
