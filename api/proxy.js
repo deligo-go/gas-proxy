@@ -20,7 +20,7 @@ module.exports = (req, res) => {
     </style>
 </head>
 <body>
-    <iframe src="${finalUrl}" allow="*" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"></iframe>
+    <iframe src="${finalUrl}" allow="*" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-top-navigation allow-top-navigation-by-user-activation"></iframe>
 </body>
 </html>`;
     
