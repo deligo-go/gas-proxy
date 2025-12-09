@@ -1,19 +1,17 @@
 // api/proxy.js
 const https = require('https');
-const { URL } = require('url'); // Using the built-in URL class
+const { URL } = require('url');
 
-// **IMPORTANT: Use YOUR full Web App URL here**
+// This URL must match your final, deployed GAS Web App URL
 const GAS_BASE = 'https://script.google.com/macros/s/AKfycbxjR1NDJlHbktoEAmA1t-m1Lphe_gV7yqI4UR99ju5WRnkFkIIrhqopz2VEiVNRQ9Pn7g/exec';
 
-// List of Google-specific query parameters to remove (always remove these)
 const IGNORED_PARAMS = ['pli', 'authuser', 'ifk'];
 
 module.exports = (req, res) => {
-    // 1. Clean the request URL
+    // Clean the request URL to remove Google-specific parameters
     const requestUrl = new URL(req.url, `https://${req.headers.host}`);
     const finalGasUrl = new URL(GAS_BASE);
 
-    // Copy ONLY valid query parameters (like ?id=VALUE)
     const originalParams = new URLSearchParams(requestUrl.search);
     
     originalParams.forEach((value, key) => {
@@ -27,13 +25,11 @@ module.exports = (req, res) => {
 
     const options = {
         hostname: parsedUrl.hostname,
-        path: parsedUrl.pathname + parsedUrl.search, // Use cleaned path and query
+        path: parsedUrl.pathname + parsedUrl.search,
         method: req.method,
         headers: {
-            // Forward standard headers
             ...req.headers,
-            // Override the Host header to match the Google Scripts server
-            'host': parsedUrl.hostname,
+            'host': parsedUrl.hostname, // Correct Host header
             'connection': 'keep-alive',
         },
     };
@@ -41,24 +37,23 @@ module.exports = (req, res) => {
     const proxyReq = https.request(options, (proxyRes) => {
         res.statusCode = proxyRes.statusCode || 200;
 
-        // 2. Filter out problematic headers and force encoding
+        // Filter out conflicting headers (CSP, XSS protection, Encoding)
         Object.keys(proxyRes.headers).forEach((key) => {
             const lowerKey = key.toLowerCase();
             
-            // BLOCK headers that interfere with CSP/CORS/XSS protection or encoding
-            if (['transfer-encoding', 'content-encoding', 'content-length', 'content-security-policy', 'x-xss-protection', 'x-frame-options'].includes(lowerKey)) {
-                return; // Skip setting this header
+            // Block headers that cause Gibberish/Security conflicts
+            if (['transfer-encoding', 'content-encoding', 'content-length', 'content-security-policy', 'x-xss-protection', 'x-frame-options', 'strict-transport-security'].includes(lowerKey)) {
+                return;
             }
             
             res.setHeader(key, proxyRes.headers[key]);
         });
         
-        // 3. Set Content-Type explicitly to fix the gibberish issue
+        // Ensure Content-Type is set for HTML output
         if (!res.headersSent && !res.getHeader('Content-Type')) {
             res.setHeader('Content-Type', 'text/html; charset=utf-8');
         }
 
-        // 4. Pipe the response
         proxyRes.pipe(res);
     });
 
@@ -66,7 +61,7 @@ module.exports = (req, res) => {
         console.error('Proxy request failed:', err);
         if (!res.headersSent) {
             res.statusCode = 502;
-            res.end('Bad Gateway: Failed to reach the Google Apps Script service.');
+            res.end('Bad Gateway.');
         }
     });
 
