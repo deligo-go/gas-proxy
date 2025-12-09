@@ -49,6 +49,9 @@ module.exports = (req, res) => {
             // Fix form actions to go through the proxy
             data = data.replace(/action="https:\/\/script\.google\.com\/macros\/s\/AKfycbxjR1NDJlHbktoEAmA1t-m1Lphe_gV7yqI4UR99ju5WRnkFkIIrhqopz2VEiVNRQ9Pn7g\/exec"/g, `action="https://${req.headers.host}"`);
             
+            // Fix sandbox domain references
+            data = data.replace(/https:\/\/n-xwppdsern6pqfjrboxkwn4vpovkkmsirbynxg4y-0lu-script\.googleusercontent\.com/g, 'https://n-xwppdsern6pqfjrboxkwn4vpovkkmsirbynxg4y-0lu-script.googleusercontent.com');
+            
             // Also fix any other relative URLs that might be problematic
             data = data.replace(/src='\/userCodeAppPanel'/g, `src='https://n-xwppdsern6pqfjrboxkwn4vpovkkmsirbynxg4y-0lu-script.googleusercontent.com/userCodeAppPanel'`);
 
