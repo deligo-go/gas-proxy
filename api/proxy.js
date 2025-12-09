@@ -87,26 +87,46 @@ module.exports = (req, res) => {
         });
 
         proxyRes.on('end', () => {
-            // Check if this is the wrapper HTML
-            if (data.includes('sandboxFrame') && data.includes('userHtml')) {
-                // Extract the actual HTML content
+            // Check if this looks like the wrapper (has sandboxFrame) or clean HTML (has <!DOCTYPE)
+            const isWrapper = data.includes('sandboxFrame') || data.includes('warning-bar-table');
+            const isCleanHtml = data.trim().startsWith('<!DOCTYPE') || data.trim().startsWith('<html');
+            
+            console.log('Response analysis:', {
+                isWrapper,
+                isCleanHtml,
+                length: data.length,
+                starts: data.substring(0, 100)
+            });
+            
+            if (isCleanHtml && !isWrapper) {
+                // Already clean HTML, serve it directly
+                console.log('✓ Serving clean HTML directly');
+                res.statusCode = 200;
+                res.setHeader('Content-Type', 'text/html; charset=utf-8');
+                res.end(data);
+            } else if (isWrapper) {
+                // Try to extract from wrapper
+                console.log('⚠ Wrapper detected, attempting extraction');
                 const userHtml = extractUserHtml(data);
                 
                 if (userHtml && userHtml.length > 500) {
-                    console.log('✓ Extracted clean HTML, length:', userHtml.length);
-                    
+                    console.log('✓ Extracted HTML, length:', userHtml.length);
                     res.statusCode = 200;
                     res.setHeader('Content-Type', 'text/html; charset=utf-8');
                     res.end(userHtml);
-                    return;
+                } else {
+                    console.log('✗ Extraction failed, serving wrapper');
+                    res.statusCode = 200;
+                    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+                    res.end(data);
                 }
+            } else {
+                // Unknown format, serve as-is
+                console.log('? Unknown format, serving as-is');
+                res.statusCode = proxyRes.statusCode || 200;
+                res.setHeader('Content-Type', 'text/html; charset=utf-8');
+                res.end(data);
             }
-            
-            // If extraction failed or it's already clean HTML, serve as-is
-            console.log('✗ Serving original response');
-            res.statusCode = proxyRes.statusCode || 200;
-            res.setHeader('Content-Type', 'text/html; charset=utf-8');
-            res.end(data);
         });
     });
 
