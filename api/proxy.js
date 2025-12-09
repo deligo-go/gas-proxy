@@ -3,35 +3,34 @@ const https = require('https');
 const { URL } = require('url');
 
 // This URL must match your final, deployed GAS Web App URL
-const GAS_BASE = 'https://script.google.com/macros/s/AKfycbzuIB_dH1qRhoOFY2Xev1Q67PZJ459ZsQLS1kw0Vo944dZFONJh3RJrf64VzUPNMRiX2g/exec';
+const GAS_BASE = 'https://script.google.com/macros/s/AKfycbwE1vWTiEbKRr09DPuw1ZwgnyRPVSWfe28UC-r5coYIkM4pw3hnY61vdOCS71AwW8D8/exec';
 const IGNORED_PARAMS = ['pli', 'authuser', 'ifk'];
 
-// Function to extract and unescape the actual HTML from GAS response
 function extractUserHtml(gasResponse) {
-    const match = gasResponse.match(/"userHtml":"((?:[^"\\]|\\.)*)"/);
+    // Try to find the userHtml field in the JSON initialization
+    const match = gasResponse.match(/"userHtml":\s*"([^]*?)(?:","|"\})/);
     if (!match) return null;
     
     let html = match[1];
-    // Unescape the JSON string - do this in correct order
-    html = html.replace(/\\x3c/g, '<')
-               .replace(/\\x3e/g, '>')
-               .replace(/\\x2f/g, '/')
-               .replace(/\\x27/g, "'")
-               .replace(/\\x26/g, '&')
-               .replace(/\\x3d/g, '=')
-               .replace(/\\x22/g, '"')
-               .replace(/\\n/g, '\n')
-               .replace(/\\r/g, '\r')
-               .replace(/\\t/g, '\t')
-               .replace(/\\"/g, '"')
-               .replace(/\\'/g, "'")
-               .replace(/\\\\/g, '\\');
+    
+    try {
+        // Parse as JSON string to handle all escapes
+        html = JSON.parse('"' + html + '"');
+    } catch (e) {
+        // Fallback: manual unescape
+        html = html.replace(/\\x([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+                   .replace(/\\n/g, '\n')
+                   .replace(/\\r/g, '\r')
+                   .replace(/\\t/g, '\t')
+                   .replace(/\\"/g, '"')
+                   .replace(/\\'/g, "'")
+                   .replace(/\\\\/g, '\\');
+    }
     
     return html;
 }
 
 module.exports = (req, res) => {
-    // Clean the request URL to remove Google-specific parameters
     const requestUrl = new URL(req.url, `https://${req.headers.host}`);
     const finalGasUrl = new URL(GAS_BASE);
 
@@ -66,30 +65,34 @@ module.exports = (req, res) => {
         });
 
         proxyRes.on('end', () => {
-            // Extract the actual user HTML from Google's wrapper
+            // Try to extract clean HTML
             const userHtml = extractUserHtml(data);
             
-            if (userHtml) {
-                // We got the clean HTML, fix the form action to point to our proxy
-                let finalHtml = userHtml.replace(
-                    /action="https:\/\/script\.google\.com\/macros\/s\/[^"]+"/g,
+            if (userHtml && userHtml.length > 500) {
+                // Successfully extracted clean HTML
+                let finalHtml = userHtml;
+                
+                // Fix form action URLs
+                finalHtml = finalHtml.replace(
+                    /action=["']https:\/\/script\.google\.com\/macros\/s\/[^"']+["']/g,
                     `action="https://${req.headers.host}"`
                 );
                 
+                console.log('Serving extracted HTML, length:', finalHtml.length);
+                
                 res.statusCode = 200;
                 res.setHeader('Content-Type', 'text/html; charset=utf-8');
-                res.setHeader('Content-Security-Policy', "default-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://thumbs.dreamstime.com; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com;");
-                res.setHeader('Content-Length', Buffer.byteLength(finalHtml));
+                res.setHeader('X-Frame-Options', 'SAMEORIGIN');
                 res.end(finalHtml);
             } else {
-                // Fallback: serve the wrapper as-is with URL rewrites
-                data = data.replace(/href="\/static\//g, 'href="https://script.google.com/static/');
-                data = data.replace(/src="\/static\//g, 'src="https://script.google.com/static/');
-                data = data.replace(/action="https:\/\/script\.google\.com\/macros\/s\/AKfycbxjR1NDJlHbktoEAmA1t-m1Lphe_gV7yqI4UR99ju5WRnkFkIIrhqopz2VEiVNRQ9Pn7g\/exec"/g, `action="https://${req.headers.host}"`);
+                // Fallback: serve wrapper with fixed URLs
+                console.log('Extraction failed, serving wrapper');
+                
+                data = data.replace(/href=["']\/static\//g, 'href="https://script.google.com/static/');
+                data = data.replace(/src=["']\/static\//g, 'src="https://script.google.com/static/');
                 
                 res.statusCode = proxyRes.statusCode || 200;
                 res.setHeader('Content-Type', 'text/html; charset=utf-8');
-                res.setHeader('Content-Length', Buffer.byteLength(data));
                 res.end(data);
             }
         });
