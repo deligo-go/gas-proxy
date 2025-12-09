@@ -4,7 +4,6 @@ const { URL } = require('url');
 
 // This URL must match your final, deployed GAS Web App URL
 const GAS_BASE = 'https://script.google.com/macros/s/AKfycbxjR1NDJlHbktoEAmA1t-m1Lphe_gV7yqI4UR99ju5WRnkFkIIrhqopz2VEiVNRQ9Pn7g/exec';
-
 const IGNORED_PARAMS = ['pli', 'authuser', 'ifk'];
 
 module.exports = (req, res) => {
